@@ -1,0 +1,16 @@
+{
+  "plan": {
+    "plan_id": "HB-01",
+    "instrument": "双站复测量规",
+    "unit": "mm",
+    "reference_position": 0,
+    "stations": ["甲站", "乙站"]
+  },
+  "readings": [
+    {"station_id": "甲站", "reading_id": "A-01", "position": -1, "value": "8", "weight": "1"},
+    {"station_id": "乙站", "reading_id": "B-01", "position": 1, "value": "2", "weight": "1"}
+  ],
+  "correction": {
+    "station_id": "甲站", "reading_id": "A-02", "position": -1, "value": "8", "weight": "2", "replaces": "A-01"
+  }
+}
