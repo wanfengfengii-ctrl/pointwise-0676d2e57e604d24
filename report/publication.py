@@ -11,7 +11,7 @@ def finalize(
     db: sqlite3.Connection, plan_id: str, first_acceptance_id: int, second_acceptance_id: int,
 ) -> SignedReport:
     plan = load_plan(db, plan_id)
-    selected = select_bundles(db, plan, first_acceptance_id, second_acceptance_id)
+    selected = select_bundles(db, plan, first_acceptance_id, second_acceptance_id, 1)
     first, second = selected.entries
     optimum = compute_joint_optimum(
         decode_evidence(first.bundle.evidence, plan.reference.domain),

@@ -39,6 +39,15 @@ V1 站件以 JSON 交接，外层固定版本、计划口径、站点、修订�
 
 无效输入、口径冲突、无效更正或不合法选件使用 `ValueError`；未知计划、修订、站件、接纳或报告号使用 `LookupError`。数据库提交错误由 SQLite 异常报告，报告主体和来源同时回滚。更正不会改写旧修订和旧站件。领取及对照只读固定快照。
 
+## V2 共享偏移稳健链路（见 SHARED_OFFSET.md）
+
+- 计划可在 `PlanSpec(..., offset_interval=(下界, 上界))` 固定有理闭偏移区间，允许单点（两端相等）；三库一致登记，同号不同声明拒绝。
+- `station.intake.record(..., sensitivity=...)` 为新测次登记有理灵敏度，零可显式登记，省略即缺证；更正把新灵敏度归于新测次，旧成员灵敏度照旧。
+- `issue.publication.issue_robust(db, plan_id, station_id, revision_id)` 按确切冻结修订发行整数版本号 2 的 `StationBundle`；计划缺偏移、成员缺灵敏度或任一修正读数 `value + sensitivity*d` 在端点越出 `[0,10]` 时拒发。同一修订的 V1/V2 可共存，同版重签取回原件。
+- V2 证据 `evidence.offset_interval` 为两个有理数字符串，另含两个偏移端点上的精确分段线性本地损失；测次清单、测次号、灵敏度和私有档位不离开站库。
+- `center.imports.accept` 同时接纳 V1/V2 对象或 JSON 文本；身份按版本、计划、站点、站件号区分，同件重投（含空白与字段顺序变化）取回原接纳号，冲突报 `ValueError`。
+- `report.publication.finalize_robust(db, plan_id, first_acceptance_id, second_acceptance_id)` 在同一参考值 `t` 和同一偏移 `d` 上先合计两站损失，再在偏移闭区间取最坏值，输出最坏总误差最低的完整闭区间及精确 `Fraction`；两份出处与报告同次原子提交。`report.retrieval.retrieve_robust(db, report_id)` 按号领取。混版、同站、错计划选件报 `ValueError`，形状合法的未知号报 `LookupError`。
+
 ## 运行
 
 ```sh

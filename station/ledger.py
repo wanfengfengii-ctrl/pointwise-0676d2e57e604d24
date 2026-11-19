@@ -14,6 +14,7 @@ class Reading:
     value: Fraction
     weight: Fraction
     replaces: str | None = None
+    sensitivity: Fraction | None = None
 
 
 def initialize_readings(db: sqlite3.Connection) -> None:
@@ -26,11 +27,15 @@ def initialize_readings(db: sqlite3.Connection) -> None:
             value TEXT NOT NULL,
             weight TEXT NOT NULL,
             replaces TEXT,
+            sensitivity TEXT,
             PRIMARY KEY (plan_id, station_id, reading_id),
             FOREIGN KEY (plan_id, station_id, replaces)
                 REFERENCES reading_facts(plan_id, station_id, reading_id)
         )
     ''')
+    columns = {row[1] for row in db.execute('PRAGMA table_info(reading_facts)')}
+    if 'sensitivity' not in columns:
+        db.execute('ALTER TABLE reading_facts ADD COLUMN sensitivity TEXT')
     db.execute('''
         CREATE TABLE IF NOT EXISTS station_drafts (
             plan_id TEXT NOT NULL REFERENCES calibration_plans(plan_id),
@@ -55,10 +60,11 @@ def initialize_readings(db: sqlite3.Connection) -> None:
 
 
 def _reading_from_row(plan_id: str, station_id: str, row: tuple) -> Reading:
-    reading_id, position, value, weight, replaces = row
+    reading_id, position, value, weight, replaces, sensitivity = row
     return Reading(
         plan_id, station_id, reading_id, int(position),
         parse_rational(value), parse_rational(weight), replaces,
+        None if sensitivity is None else parse_rational(sensitivity),
     )
 
 
@@ -66,7 +72,7 @@ def load_reading(
     db: sqlite3.Connection, plan_id: str, station_id: str, reading_id: str
 ) -> Reading:
     row = db.execute('''
-        SELECT reading_id, position, value, weight, replaces
+        SELECT reading_id, position, value, weight, replaces, sensitivity
         FROM reading_facts WHERE plan_id = ? AND station_id = ? AND reading_id = ?
     ''', (plan_id, station_id, reading_id)).fetchone()
     if row is None:
@@ -76,7 +82,7 @@ def load_reading(
 
 def load_draft(db: sqlite3.Connection, plan_id: str, station_id: str) -> tuple[Reading, ...]:
     rows = db.execute('''
-        SELECT r.reading_id, r.position, r.value, r.weight, r.replaces
+        SELECT r.reading_id, r.position, r.value, r.weight, r.replaces, r.sensitivity
         FROM draft_members AS d
         JOIN reading_facts AS r USING (plan_id, station_id, reading_id)
         WHERE d.plan_id = ? AND d.station_id = ?
@@ -94,12 +100,15 @@ def load_draft_base(db: sqlite3.Connection, plan_id: str, station_id: str) -> in
 
 def _insert_reading(db: sqlite3.Connection, reading: Reading) -> None:
     inserted = db.execute('''
-        INSERT INTO reading_facts (plan_id, station_id, reading_id, position, value, weight, replaces)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO reading_facts (
+            plan_id, station_id, reading_id, position, value, weight, replaces, sensitivity
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(plan_id, station_id, reading_id) DO NOTHING
     ''', (
         reading.plan_id, reading.station_id, reading.reading_id, str(reading.position),
         encode_rational(reading.value), encode_rational(reading.weight), reading.replaces,
+        None if reading.sensitivity is None else encode_rational(reading.sensitivity),
     ))
     if inserted.rowcount != 1:
         raise ValueError(f'reading ID already exists: {reading.reading_id!r}')

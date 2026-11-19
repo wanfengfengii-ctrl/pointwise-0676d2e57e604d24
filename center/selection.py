@@ -14,13 +14,17 @@ class SelectedBundles:
 
 def select_bundles(
     db: sqlite3.Connection, plan: PlanSpec, first_id: int, second_id: int,
+    expected_version: int,
 ) -> SelectedBundles:
     by_station = {}
     for acceptance_id in (first_id, second_id):
         entry = load_accepted(db, acceptance_id)
-        if entry.bundle.plan_id != plan.plan_id:
+        bundle = entry.bundle
+        if bundle.plan_id != plan.plan_id:
             raise ValueError('selected bundle belongs to a different plan')
-        station = require_applicable_station(entry.bundle.station_id, plan.stations)
+        if bundle.version != expected_version:
+            raise ValueError('each selected bundle must use the same publication version')
+        station = require_applicable_station(bundle.station_id, plan.stations)
         if station in by_station:
             raise ValueError('select one accepted bundle from each of the two plan stations')
         by_station[station] = entry

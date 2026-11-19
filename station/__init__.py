@@ -13,3 +13,5 @@ def initialize_station(db: sqlite3.Connection) -> None:
     initialize_readings(db)
     initialize_revisions(db)
     initialize_station_artifacts(db)
+    if db.in_transaction:
+        db.commit()

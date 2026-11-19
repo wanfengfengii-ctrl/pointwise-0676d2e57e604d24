@@ -82,6 +82,8 @@ class StationBundle:
             raise ValueError('bundle must declare two applicable stations')
         if not isinstance(fields['evidence'], dict):
             raise ValueError('bundle evidence must be an object')
+        if type(fields['version']) is not int or fields['version'] not in (1, 2):
+            raise ValueError('unsupported station bundle version')
         return cls(
             fields['bundle_id'], fields['plan_id'], fields['instrument'], fields['unit'],
             fields['reference_position'], (parse_rational(domain[0]), parse_rational(domain[1])),
@@ -93,36 +95,69 @@ class StationBundle:
 def initialize_station_artifacts(db: sqlite3.Connection) -> None:
     db.execute('''
         CREATE TABLE IF NOT EXISTS station_bundles (
-            bundle_id INTEGER PRIMARY KEY REFERENCES reading_revisions(revision_id),
-            wire TEXT NOT NULL
+            bundle_id INTEGER NOT NULL REFERENCES reading_revisions(revision_id),
+            version INTEGER NOT NULL,
+            wire TEXT NOT NULL,
+            PRIMARY KEY (bundle_id, version)
         )
     ''')
+    columns = {row[1] for row in db.execute('PRAGMA table_info(station_bundles)')}
+    if 'version' not in columns:
+        # A V1-era table keyed only by bundle ID: keep every fixed V1 artifact.
+        # FK enforcement must be off while renaming a table that other schemas
+        # reference, otherwise the rename fires cascading delete actions.
+        foreign_keys = db.execute('PRAGMA foreign_keys').fetchone()[0]
+        db.execute('PRAGMA foreign_keys = OFF')
+        db.execute('ALTER TABLE station_bundles RENAME TO station_bundles_v1_legacy')
+        db.execute('''
+            CREATE TABLE station_bundles (
+                bundle_id INTEGER NOT NULL REFERENCES reading_revisions(revision_id),
+                version INTEGER NOT NULL,
+                wire TEXT NOT NULL,
+                PRIMARY KEY (bundle_id, version)
+            )
+        ''')
+        db.execute('''
+            INSERT INTO station_bundles (bundle_id, version, wire)
+            SELECT bundle_id, 1, wire FROM station_bundles_v1_legacy
+        ''')
+        db.execute('DROP TABLE station_bundles_v1_legacy')
+        if foreign_keys:
+            db.execute('PRAGMA foreign_keys = ON')
 
 
 def archive_station_bundle(
-    db: sqlite3.Connection, plan: PlanSpec, station_id: str, revision_id: int, evidence: dict,
+    db: sqlite3.Connection, plan: PlanSpec, station_id: str, revision_id: int,
+    evidence: dict, version: int = 1,
 ) -> StationBundle:
-    # Each frozen revision has one station artifact identity in its issuing database.
+    # Each frozen revision has one artifact identity per version in its issuing database.
     bundle = StationBundle(
         revision_id, plan.plan_id, plan.instrument, plan.unit, plan.reference.position,
-        plan.reference.domain, plan.stations, station_id, revision_id, _json_text(evidence),
+        plan.reference.domain, plan.stations, station_id, revision_id, _json_text(evidence), version,
     )
     db.execute('BEGIN IMMEDIATE')
     with db:
         db.execute('''
-            INSERT INTO station_bundles (bundle_id, wire) VALUES (?, ?)
-            ON CONFLICT(bundle_id) DO NOTHING
-        ''', (bundle.bundle_id, bundle.to_json()))
-        archived = load_station_bundle(db, bundle.bundle_id)
+            INSERT INTO station_bundles (bundle_id, version, wire) VALUES (?, ?, ?)
+            ON CONFLICT(bundle_id, version) DO NOTHING
+        ''', (bundle.bundle_id, bundle.version, bundle.to_json()))
+        archived = load_station_bundle(db, bundle.bundle_id, bundle.version)
         if archived != bundle:
             raise ValueError('the frozen revision already has different archived evidence')
     return archived
 
 
-def load_station_bundle(db: sqlite3.Connection, bundle_id: int) -> StationBundle:
+def load_station_bundle(
+    db: sqlite3.Connection, bundle_id: int, version: int = 1,
+) -> StationBundle:
     if type(bundle_id) is not int or not 1 <= bundle_id < 2**63:
         raise ValueError('bundle ID must be a positive SQLite integer')
-    row = db.execute('SELECT wire FROM station_bundles WHERE bundle_id = ?', (bundle_id,)).fetchone()
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError('unsupported station bundle version')
+    row = db.execute(
+        'SELECT wire FROM station_bundles WHERE bundle_id = ? AND version = ?',
+        (bundle_id, version),
+    ).fetchone()
     if row is None:
         raise LookupError(f'unknown station bundle {bundle_id}')
     return StationBundle.from_json(row[0])
